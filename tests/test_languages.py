@@ -6,7 +6,7 @@ from graphify.extract import (
     extract_java, extract_c, extract_cpp, extract_ruby,
     extract_csharp, extract_kotlin, extract_scala, extract_php,
     extract_swift, extract_go, extract_julia, extract_js, extract_fortran,
-    extract_groovy,
+    extract_groovy, extract_bsl,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -792,6 +792,66 @@ def test_fortran_capital_F_parses_preprocessed():
 
 
 # ── TypeScript dynamic imports ───────────────────────────────────────────────
+
+# ── BSL extractor ────────────────────────────────────────────────────────────
+
+def test_bsl_no_error():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    assert "error" not in r
+
+
+def test_bsl_finds_russian_procedure_and_function():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    labels = _labels(r)
+    assert "РассчитатьИПоказать()" in labels
+    assert "РассчитатьНалог()" in labels
+
+
+def test_bsl_finds_english_keywords():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    labels = _labels(r)
+    assert "EnglishProcedure()" in labels
+    assert "EnglishHelper()" in labels
+
+
+def test_bsl_preserves_export_execution_context_and_async_metadata():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    nodes = {n["label"]: n for n in r["nodes"]}
+    assert nodes["РассчитатьИПоказать()"]["bsl_export"] is True
+    assert nodes["РассчитатьИПоказать()"]["bsl_execution_context"] == "НаКлиенте"
+    assert nodes["РассчитатьНалог()"]["bsl_export"] is True
+    assert nodes["РассчитатьНалог()"]["bsl_execution_context"] == "НаСервереБезКонтекста"
+    assert nodes["ЗапуститьАсинх()"]["bsl_async"] is True
+
+
+def test_bsl_finds_exported_module_variable():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    nodes = {n["label"]: n for n in r["nodes"]}
+    assert nodes["ОбщийКэш"]["symbol_kind"] == "variable"
+    assert nodes["ОбщийКэш"]["bsl_export"] is True
+
+
+def test_bsl_emits_local_call_edges():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    calls = _calls(r)
+    assert ("РассчитатьИПоказать()", "РассчитатьНалог()") in calls
+    assert ("EnglishProcedure()", "EnglishHelper()") in calls
+
+
+def test_bsl_call_edges_have_call_context():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    call_edges = _edges_with_relation(r, "calls")
+    assert call_edges
+    assert all(e.get("context") == "call" for e in call_edges)
+
+
+def test_bsl_no_dangling_edges():
+    r = extract_bsl(FIXTURES / "sample.bsl")
+    node_ids = {n["id"] for n in r["nodes"]}
+    for e in r["edges"]:
+        assert e["source"] in node_ids
+        assert e["target"] in node_ids
+
 
 def test_ts_dynamic_import_no_error():
     r = extract_js(FIXTURES / "dynamic_import.ts")

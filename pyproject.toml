@@ -15,6 +15,7 @@ dependencies = [
     "datasketch",
     "rapidfuzz",
     "tree-sitter>=0.23.0",
+    "tree-sitter-bsl",
     "tree-sitter-python",
     "tree-sitter-javascript",
     "tree-sitter-typescript",

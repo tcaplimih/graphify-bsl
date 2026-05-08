@@ -30,9 +30,9 @@ def _safe_extract(extractor: Callable, path: Path) -> dict:
 
 
 def _make_id(*parts: str) -> str:
-    """Build a stable node ID from one or more name parts."""
+    """Собрать стабильный ID узла из частей имени, сохраняя Unicode-буквы."""
     combined = "_".join(p.strip("_.") for p in parts if p)
-    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", combined)
+    cleaned = re.sub(r"[\W_]+", "_", combined, flags=re.UNICODE)
     return cleaned.strip("_").lower()
 
 
@@ -1958,6 +1958,215 @@ def _extract_python_rationale(path: Path, result: dict) -> None:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
+_BSL_FUNCTION_TYPES = frozenset({"procedure_definition", "function_definition"})
+_BSL_CALL_TYPES = frozenset({"call_expression", "method_call"})
+
+
+def _bsl_directives_before(node, source: bytes) -> list[str]:
+    directives: list[str] = []
+    prev = node.prev_named_sibling
+    while prev is not None and prev.type == "preprocessor":
+        text = _read_text(prev, source).strip()
+        if text.startswith("&"):
+            directives.append(text.lstrip("&").split("(", 1)[0].strip())
+        prev = prev.prev_named_sibling
+    directives.reverse()
+    return directives
+
+
+def _bsl_execution_context(directives: list[str]) -> str | None:
+    contexts = {
+        "НаКлиенте",
+        "AtClient",
+        "НаСервере",
+        "AtServer",
+        "НаСервереБезКонтекста",
+        "AtServerNoContext",
+        "НаКлиентеНаСервереБезКонтекста",
+        "AtClientAtServerNoContext",
+    }
+    for directive in directives:
+        if directive in contexts:
+            return directive
+    return None
+
+
+def _bsl_node_has_child_type(node, child_type: str) -> bool:
+    return any(child.type == child_type for child in node.children)
+
+
+def _bsl_call_name(node, source: bytes) -> tuple[str | None, bool]:
+    if node.type == "method_call":
+        name_node = node.child_by_field_name("name")
+        return (_read_text(name_node, source), False) if name_node else (None, False)
+    if node.type == "call_expression":
+        for child in node.children:
+            if child.type == "method_call":
+                name_node = child.child_by_field_name("name")
+                if name_node is not None:
+                    return _read_text(name_node, source), True
+    return None, False
+
+
+def extract_bsl(path: Path) -> dict:
+    """Извлечь процедуры, функции, переменные модуля, директивы и вызовы BSL."""
+    try:
+        import tree_sitter_bsl as tsbsl
+        from tree_sitter import Language, Parser
+        language = Language(tsbsl.language())
+    except ImportError:
+        return {"nodes": [], "edges": [], "error": "tree_sitter_bsl not installed"}
+    except Exception as e:
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+    try:
+        parser = Parser(language)
+        source = path.read_bytes()
+        tree = parser.parse(source)
+        root = tree.root_node
+    except Exception as e:
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+    stem = _file_stem(path)
+    str_path = str(path)
+    nodes: list[dict] = []
+    edges: list[dict] = []
+    raw_calls: list[dict] = []
+    seen_ids: set[str] = set()
+    label_to_nid: dict[str, str] = {}
+    function_bodies: list[tuple[str, object]] = []
+
+    def add_node(nid: str, label: str, line: int, **attrs) -> None:
+        if nid in seen_ids:
+            return
+        seen_ids.add(nid)
+        node = {
+            "id": nid,
+            "label": label,
+            "file_type": "code",
+            "source_file": str_path,
+            "source_location": f"L{line}",
+        }
+        node.update(attrs)
+        nodes.append(node)
+
+    def add_edge(
+        src: str,
+        tgt: str,
+        relation: str,
+        line: int,
+        confidence: str = "EXTRACTED",
+        context: str | None = None,
+    ) -> None:
+        edge = {
+            "source": src,
+            "target": tgt,
+            "relation": relation,
+            "confidence": confidence,
+            "source_file": str_path,
+            "source_location": f"L{line}",
+            "weight": 1.0,
+        }
+        if context:
+            edge["context"] = context
+        edges.append(edge)
+
+    file_nid = _make_id(str(path))
+    add_node(file_nid, path.name, 1, symbol_kind="file")
+
+    def walk_definitions(node) -> None:
+        if node.type in _BSL_FUNCTION_TYPES:
+            name_node = node.child_by_field_name("name")
+            if name_node is not None:
+                name = _read_text(name_node, source)
+                line = node.start_point[0] + 1
+                nid = _make_id(stem, name)
+                directives = _bsl_directives_before(node, source)
+                kind = "procedure" if node.type == "procedure_definition" else "function"
+                add_node(
+                    nid,
+                    f"{name}()",
+                    line,
+                    symbol_kind=kind,
+                    bsl_export=node.child_by_field_name("export") is not None,
+                    bsl_async=_bsl_node_has_child_type(node, "ASYNC_KEYWORD"),
+                    bsl_annotations=directives,
+                    bsl_execution_context=_bsl_execution_context(directives),
+                )
+                label_to_nid[name.lower()] = nid
+                add_edge(file_nid, nid, "contains", line)
+                function_bodies.append((nid, node))
+            return
+
+        if node.type == "var_definition":
+            line = node.start_point[0] + 1
+            for child in node.children:
+                if child.type != "identifier":
+                    continue
+                name = _read_text(child, source)
+                nid = _make_id(stem, name)
+                add_node(
+                    nid,
+                    name,
+                    child.start_point[0] + 1,
+                    symbol_kind="variable",
+                    bsl_export=node.child_by_field_name("export") is not None,
+                )
+                add_edge(file_nid, nid, "contains", line)
+            return
+
+        for child in node.children:
+            walk_definitions(child)
+
+    walk_definitions(root)
+
+    seen_call_pairs: set[tuple[str, str]] = set()
+
+    def walk_calls(node, caller_nid: str, root_node) -> None:
+        if node is not root_node and node.type in _BSL_FUNCTION_TYPES:
+            return
+
+        handled_call_expression = False
+        if node.type in _BSL_CALL_TYPES:
+            callee_name, is_member_call = _bsl_call_name(node, source)
+            if callee_name:
+                tgt_nid = label_to_nid.get(callee_name.lower())
+                if tgt_nid and tgt_nid != caller_nid:
+                    pair = (caller_nid, tgt_nid)
+                    if pair not in seen_call_pairs:
+                        seen_call_pairs.add(pair)
+                        add_edge(
+                            caller_nid,
+                            tgt_nid,
+                            "calls",
+                            node.start_point[0] + 1,
+                            context="call",
+                        )
+                elif not tgt_nid:
+                    raw_calls.append({
+                        "caller_nid": caller_nid,
+                        "callee": callee_name,
+                        "is_member_call": is_member_call,
+                        "source_file": str_path,
+                        "source_location": f"L{node.start_point[0] + 1}",
+                    })
+            handled_call_expression = node.type == "call_expression"
+
+        for child in node.children:
+            if handled_call_expression and child.type == "method_call":
+                continue
+            walk_calls(child, caller_nid, root_node)
+
+    for caller_nid, body_node in function_bodies:
+        walk_calls(body_node, caller_nid, body_node)
+
+    clean_edges = [
+        edge for edge in edges
+        if edge["source"] in seen_ids and edge["target"] in seen_ids
+    ]
+    return {"nodes": nodes, "edges": clean_edges, "raw_calls": raw_calls}
+
 
 def extract_python(path: Path) -> dict:
     """Extract classes, functions, and imports from a .py file via tree-sitter AST."""
@@ -4544,6 +4753,7 @@ _DISPATCH: dict[str, Any] = {
     ".mjs": extract_js,
     ".ts": extract_js,
     ".tsx": extract_js,
+    ".bsl": extract_bsl,
     ".go": extract_go,
     ".rs": extract_rust,
     ".java": extract_java,

@@ -9,6 +9,9 @@ def test_classify_python():
 def test_classify_typescript():
     assert classify_file(Path("bar.ts")) == FileType.CODE
 
+def test_classify_bsl():
+    assert classify_file(Path("module.bsl")) == FileType.CODE
+
 def test_classify_markdown():
     assert classify_file(Path("README.md")) == FileType.DOCUMENT
 

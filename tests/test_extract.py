@@ -20,6 +20,12 @@ def test_make_id_no_leading_trailing_underscores():
     assert not result.endswith("_")
 
 
+def test_make_id_preserves_cyrillic_identifiers():
+    assert _make_id("Модуль", "РассчитатьИтоги") == "модуль_рассчитатьитоги"
+    assert _make_id("Модуль", "Печать") == "модуль_печать"
+    assert _make_id("Модуль", "РассчитатьИтоги") != _make_id("Модуль", "Печать")
+
+
 def test_extract_python_finds_class():
     result = extract_python(FIXTURES / "sample.py")
     labels = [n["label"] for n in result["nodes"]]

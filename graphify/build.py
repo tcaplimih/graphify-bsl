@@ -30,12 +30,12 @@ from .validate import validate_extraction
 
 
 def _normalize_id(s: str) -> str:
-    """Normalize an ID string the same way extract._make_id does.
+    """Нормализовать ID так же, как это делает extract._make_id.
 
-    Used to reconcile edge endpoints when the LLM generates IDs with slightly
-    different punctuation or casing than the AST extractor.
+    Используется, когда LLM возвращает endpoints ребер с другими знаками
+    пунктуации или регистром, чем AST extractor.
     """
-    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", s)
+    cleaned = re.sub(r"[\W_]+", "_", s, flags=re.UNICODE)
     return cleaned.strip("_").lower()
 
 
@@ -161,8 +161,8 @@ def build(
 
 
 def _norm_label(label: str) -> str:
-    """Canonical dedup key — lowercase, alphanumeric only."""
-    return re.sub(r"[^a-z0-9 ]", "", label.lower()).strip()
+    """Канонический dedup-ключ: lowercase и Unicode-буквы/цифры."""
+    return re.sub(r"[^\w ]", "", label.lower(), flags=re.UNICODE).replace("_", "").strip()
 
 
 def deduplicate_by_label(nodes: list[dict], edges: list[dict]) -> tuple[list[dict], list[dict]]:

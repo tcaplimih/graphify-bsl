@@ -1,11 +1,16 @@
 import json
 from pathlib import Path
-from graphify.build import build_from_json, build
+from graphify.build import build_from_json, build, _normalize_id
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
 def load_extraction():
     return json.loads((FIXTURES / "extraction.json").read_text())
+
+
+def test_normalize_id_preserves_cyrillic_identifiers():
+    assert _normalize_id("Модуль:РассчитатьИтоги()") == "модуль_рассчитатьитоги"
+    assert _normalize_id("Модуль:Печать()") == "модуль_печать"
 
 def test_build_from_json_node_count():
     G = build_from_json(load_extraction())

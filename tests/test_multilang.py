@@ -185,6 +185,7 @@ def test_extract_dispatches_all_languages():
         FIXTURES / "sample.ts",
         FIXTURES / "sample.go",
         FIXTURES / "sample.rs",
+        FIXTURES / "sample.bsl",
     ]
     r = extract(files)
     source_files = {n["source_file"] for n in r["nodes"] if n["source_file"]}
@@ -193,6 +194,26 @@ def test_extract_dispatches_all_languages():
     assert any("sample.ts" in f for f in source_files)
     assert any("sample.go" in f for f in source_files)
     assert any("sample.rs" in f for f in source_files)
+    assert any("sample.bsl" in f for f in source_files)
+
+
+def test_bsl_cross_file_call_resolution():
+    files = [
+        FIXTURES / "bsl_module_a.bsl",
+        FIXTURES / "bsl_module_b.bsl",
+    ]
+    r = extract(files)
+    node_by_id = {n["id"]: n["label"] for n in r["nodes"]}
+    calls = {
+        (
+            node_by_id.get(e["source"], e["source"]),
+            node_by_id.get(e["target"], e["target"]),
+            e["confidence"],
+        )
+        for e in r["edges"]
+        if e["relation"] == "calls"
+    }
+    assert ("ВызватьОбщуюПроцедуру()", "ОбщаяПроцедура()", "INFERRED") in calls
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

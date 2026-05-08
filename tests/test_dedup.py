@@ -1,10 +1,15 @@
 """Tests for graphify/dedup.py entity deduplication pipeline."""
 from __future__ import annotations
 import pytest
-from graphify.dedup import deduplicate_entities, _entropy, _shingles
+from graphify.dedup import deduplicate_entities, _entropy, _shingles, _norm
 
 
 # ── entropy gate ─────────────────────────────────────────────────────────────
+
+def test_dedup_norm_preserves_cyrillic_labels():
+    assert _norm("РассчитатьИтоги()") == "рассчитатьитоги"
+    assert _norm("Печать Документа") == "печать документа"
+
 
 def test_entropy_short_label_low():
     assert _entropy("AI") < 2.5

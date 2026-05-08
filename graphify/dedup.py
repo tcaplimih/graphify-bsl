@@ -15,8 +15,8 @@ from rapidfuzz.distance import JaroWinkler
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _norm(label: str) -> str:
-    """Lowercase + collapse non-alphanumeric runs to space."""
-    return re.sub(r"[^a-z0-9]+", " ", label.lower()).strip()
+    """Lowercase и замена серий не-Unicode-букв/цифр на пробел."""
+    return re.sub(r"[\W_]+", " ", label.lower(), flags=re.UNICODE).strip()
 
 
 def _entropy(label: str) -> float:
