@@ -62,6 +62,8 @@ Every extractor returns:
 4. Add the tree-sitter package to `pyproject.toml` dependencies.
 5. Add a fixture file to `tests/fixtures/` and tests to `tests/test_languages.py`.
 
+BSL реализован отдельным extractor-ом, а не через generic-конфигурацию: нужно сохранять кириллические identifiers в ID, процедуры и функции BSL содержат executable statements прямо внутри definition node, а `Экспорт`, `Асинх` и директивы исполнения `&НаКлиенте` / `&НаСервере...` являются полезными metadata графа.
+
 ## Security
 
 All external input passes through `graphify/security.py` before use:
